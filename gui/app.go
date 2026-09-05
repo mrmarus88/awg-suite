@@ -102,11 +102,12 @@ type ConnectRequest struct {
 
 // InstallRequest carries the install options from the UI.
 type InstallRequest struct {
-	Port   string `json:"port"`   // optional UDP port (blank = auto/free)
-	Client string `json:"client"` // first client name
-	Preset string `json:"preset"` // obfuscation profile: mobile|desktop|plain (blank = mobile)
-	Dns1   string `json:"dns1"`   // optional custom DNS (blank = default)
-	Dns2   string `json:"dns2"`   // optional secondary DNS
+	Port              string `json:"port"`              // optional UDP port (blank = auto/free)
+	Client            string `json:"client"`            // first client name
+	Preset            string `json:"preset"`            // obfuscation profile: mobile|desktop|plain (blank = mobile)
+	Dns1              string `json:"dns1"`              // optional custom DNS (blank = default)
+	Dns2              string `json:"dns2"`              // optional secondary DNS
+	SecondaryEndpoint string `json:"secondaryEndpoint"` // optional second public IP/host
 }
 
 // StatusResult reports whether the connected server already has AmneziaWG.
@@ -123,9 +124,11 @@ type PanelResult struct {
 // ClientResult is a freshly created client's config plus a scannable QR image
 // rendered as a data URI for direct use in an <img src>.
 type ClientResult struct {
-	Name string `json:"name"`
-	Conf string `json:"conf"`
-	QR   string `json:"qr"`
+	Name    string `json:"name"`
+	Conf    string `json:"conf"`
+	QR      string `json:"qr"`
+	ConfAlt string `json:"confAlt,omitempty"`
+	QRAlt   string `json:"qrAlt,omitempty"`
 }
 
 // --- bound methods ---------------------------------------------------------
@@ -256,6 +259,12 @@ func (a *App) Install(req InstallRequest) (ClientResult, error) {
 	if d := strings.TrimSpace(req.Dns2); d != "" {
 		env["AWG_DNS2"] = d
 	}
+	if endpoint := strings.TrimSpace(req.SecondaryEndpoint); endpoint != "" {
+		if !validEndpointHost(endpoint) {
+			return ClientResult{}, fmt.Errorf("резервный Endpoint должен быть IPv4-адресом или именем хоста")
+		}
+		env["AWG_SERVER_IP_ALT"] = endpoint
+	}
 
 	out, err := cl.RunScript(deploy.InstallCommand(deploy.Sudo(t.User), env), amneziawg.InstallerScript, a.logWriter("install:log"))
 	if err != nil {
@@ -372,7 +381,48 @@ func (a *App) ClientConfig(name string) (ClientResult, error) {
 	if err != nil || strings.TrimSpace(out) == "" {
 		return ClientResult{}, fmt.Errorf("конфиг клиента не найден на сервере (возможно, он создан вне установщика)")
 	}
-	return clientResultFromConf(name, strings.TrimSpace(out)+"\n"), nil
+	primary := strings.TrimSpace(out) + "\n"
+	paramsOut, _ := cl.Run(deploy.Sudo(t.User) + "cat /etc/amnezia/amneziawg/params 2>/dev/null || true")
+	params := awgctl.ParseParams(paramsOut)
+	alt := ""
+	if params.ServerPubIPAlt != "" {
+		// Generate it on demand instead of relying on a second file. This lets a
+		// server that already had clients gain fallback exports immediately after
+		// SetSecondaryEndpoint, with no peer/key changes or reinstallation.
+		alt = awgctl.WithEndpoint(primary, params.ServerPubIPAlt, params.ServerPort)
+	}
+	return clientResultFromConfs(name, primary, alt), nil
+}
+
+// SetSecondaryEndpoint changes only the optional fallback address in params.
+// Existing peers and their primary profiles keep working; new/exported profiles
+// can then use the same keys through the new address.
+func (a *App) SetSecondaryEndpoint(endpoint string) error {
+	cl, t, err := a.conn()
+	if err != nil {
+		return err
+	}
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint != "" && !validEndpointHost(endpoint) {
+		return fmt.Errorf("резервный Endpoint должен быть IPv4-адресом или именем хоста")
+	}
+	out, err := cl.RunScript(deploy.SetSecondaryEndpointCommand(deploy.Sudo(t.User), endpoint), amneziawg.InstallerScript, a.logWriter("endpoint:log"))
+	if err != nil {
+		return fmt.Errorf("не удалось сохранить резервный Endpoint: %w\n%s", err, out)
+	}
+	return nil
+}
+
+func validEndpointHost(s string) bool {
+	if s == "" {
+		return true
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // RenameClient renames a client on the server.
@@ -788,7 +838,22 @@ func buildClientResult(name, output string) (ClientResult, error) {
 	if err != nil {
 		return ClientResult{}, fmt.Errorf("не нашёл конфиг клиента в выводе: %w", err)
 	}
-	return clientResultFromConf(name, conf), nil
+	return clientResultFromConfs(name, conf, extractSecondaryConfig(output)), nil
+}
+
+func extractSecondaryConfig(output string) string {
+	const begin = "-----BEGIN_AWG_CONF_SECONDARY-----"
+	const end = "-----END_AWG_CONF_SECONDARY-----"
+	start := strings.Index(output, begin)
+	if start < 0 {
+		return ""
+	}
+	rest := output[start+len(begin):]
+	finish := strings.Index(rest, end)
+	if finish < 0 {
+		return ""
+	}
+	return strings.TrimSpace(rest[:finish]) + "\n"
 }
 
 // validPanelPassword enforces a non-trivial admin password (the panel is reachable
@@ -817,9 +882,18 @@ func validPanelPassword(p string) bool {
 // clientResultFromConf wraps a client config with a scannable QR data URI.
 // Low EC + a large image keeps the long AmneziaWG config QR scannable.
 func clientResultFromConf(name, conf string) ClientResult {
-	res := ClientResult{Name: name, Conf: conf}
+	return clientResultFromConfs(name, conf, "")
+}
+
+func clientResultFromConfs(name, conf, alt string) ClientResult {
+	res := ClientResult{Name: name, Conf: conf, ConfAlt: alt}
 	if png, err := qrcode.Encode(conf, qrcode.Low, 512); err == nil {
 		res.QR = "data:image/png;base64," + encodeBase64(png)
+	}
+	if alt != "" {
+		if png, err := qrcode.Encode(alt, qrcode.Low, 512); err == nil {
+			res.QRAlt = "data:image/png;base64," + encodeBase64(png)
+		}
 	}
 	return res
 }

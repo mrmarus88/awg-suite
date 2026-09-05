@@ -124,6 +124,12 @@ func (c FileController) AddClient(name string, opts AddOptions) (Client, error) 
 	if err := os.WriteFile(c.clientFile(name), []byte(clientCfg), 0o600); err != nil {
 		return Client{}, err
 	}
+	if params.ServerPubIPAlt != "" {
+		altCfg := WithEndpoint(clientCfg, params.ServerPubIPAlt, params.ServerPort)
+		if err := os.WriteFile(c.secondaryClientFile(name), []byte(altCfg), 0o600); err != nil {
+			return Client{}, err
+		}
+	}
 	if err := c.syncConf(); err != nil {
 		return Client{}, err
 	}
@@ -142,6 +148,7 @@ func (c FileController) RevokeClient(name string) error {
 		return err
 	}
 	_ = os.Remove(c.clientFile(name))
+	_ = os.Remove(c.secondaryClientFile(name))
 	if c.Store != nil {
 		_ = c.Store.Delete(name)
 	}
@@ -245,6 +252,7 @@ func (c FileController) RenameClient(oldName, newName string) error {
 		}
 	}
 	_ = os.Rename(c.clientFile(oldName), c.clientFile(newName))
+	_ = os.Rename(c.secondaryClientFile(oldName), c.secondaryClientFile(newName))
 
 	if c.Store != nil {
 		if rec, ok := c.Store.Get(oldName); ok {
@@ -272,6 +280,35 @@ func (c FileController) ClientConfig(name string) (string, error) {
 		return "", fmt.Errorf("config for %q unavailable (only panel-created clients are stored): %w", name, err)
 	}
 	return string(data), nil
+}
+
+// ClientConfigForEndpoint exports the configured fallback profile without
+// creating a new peer. endpoint must be "primary" or "secondary".
+func (c FileController) ClientConfigForEndpoint(name, endpoint string) (string, error) {
+	cfg, err := c.ClientConfig(name)
+	if err != nil || endpoint == "" || endpoint == "primary" {
+		return cfg, err
+	}
+	if endpoint != "secondary" {
+		return "", fmt.Errorf("unknown endpoint profile %q", endpoint)
+	}
+	paramsBytes, err := os.ReadFile(c.ParamPath)
+	if err != nil {
+		return "", err
+	}
+	params := ParseParams(string(paramsBytes))
+	if params.ServerPubIPAlt == "" {
+		return "", fmt.Errorf("secondary endpoint is not configured")
+	}
+	return WithEndpoint(cfg, params.ServerPubIPAlt, params.ServerPort), nil
+}
+
+// HasSecondaryEndpoint reports whether this server has an optional fallback
+// endpoint. Read errors deliberately look like false to keep old installs and
+// callers that do not need the feature working as before.
+func (c FileController) HasSecondaryEndpoint() bool {
+	data, err := os.ReadFile(c.ParamPath)
+	return err == nil && ParseParams(string(data)).ServerPubIPAlt != ""
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -305,6 +342,10 @@ func (c FileController) record(name, pub string, octet int, block string, opts A
 
 func (c FileController) clientFile(name string) string {
 	return filepath.Join(c.ClientDir, c.Iface+"-client-"+name+".conf")
+}
+
+func (c FileController) secondaryClientFile(name string) string {
+	return filepath.Join(c.ClientDir, c.Iface+"-client-"+name+"-secondary.conf")
 }
 
 func (c FileController) genKey() (string, error) { return runOut("awg", "genkey") }

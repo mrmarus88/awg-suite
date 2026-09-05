@@ -12,7 +12,11 @@ import (
 // Params mirrors the key=value file at /etc/amnezia/amneziawg/params written by
 // the installer. Only the fields the panel needs are kept.
 type Params struct {
-	ServerPubIP    string
+	ServerPubIP string
+	// ServerPubIPAlt is an optional fallback client endpoint. It is absent on
+	// installations made before multi-endpoint support and must never replace
+	// ServerPubIP, which remains the primary/backward-compatible endpoint.
+	ServerPubIPAlt string
 	ServerPort     string
 	ServerPubKey   string
 	ClientDNS1     string
@@ -39,21 +43,22 @@ func ParseParams(content string) Params {
 		kv[strings.TrimSpace(k)] = strings.TrimSpace(v)
 	}
 	return Params{
-		ServerPubIP:  kv["SERVER_PUB_IP"],
-		ServerPort:   kv["SERVER_PORT"],
-		ServerPubKey: kv["SERVER_PUB_KEY"],
-		ClientDNS1:   kv["CLIENT_DNS_1"],
-		ClientDNS2:   kv["CLIENT_DNS_2"],
-		ClientMTU:    orDefault(kv["CLIENT_MTU"], "1420"),
-		Jc:           kv["JC"],
-		Jmin:         kv["JMIN"],
-		Jmax:         kv["JMAX"],
-		S1:           kv["S1"],
-		S2:           kv["S2"],
-		H1:           kv["H1"],
-		H2:           kv["H2"],
-		H3:           kv["H3"],
-		H4:           kv["H4"],
+		ServerPubIP:    kv["SERVER_PUB_IP"],
+		ServerPubIPAlt: kv["SERVER_PUB_IP_ALT"],
+		ServerPort:     kv["SERVER_PORT"],
+		ServerPubKey:   kv["SERVER_PUB_KEY"],
+		ClientDNS1:     kv["CLIENT_DNS_1"],
+		ClientDNS2:     kv["CLIENT_DNS_2"],
+		ClientMTU:      orDefault(kv["CLIENT_MTU"], "1420"),
+		Jc:             kv["JC"],
+		Jmin:           kv["JMIN"],
+		Jmax:           kv["JMAX"],
+		S1:             kv["S1"],
+		S2:             kv["S2"],
+		H1:             kv["H1"],
+		H2:             kv["H2"],
+		H3:             kv["H3"],
+		H4:             kv["H4"],
 	}
 }
 

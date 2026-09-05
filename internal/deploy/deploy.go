@@ -104,6 +104,12 @@ func AddClientCommand(sudo, name string, env map[string]string) string {
 	return sudo + "env " + envArgs(full) + " bash -s -- --add-client " + shellQuote(name)
 }
 
+// SetSecondaryEndpointCommand updates the optional fallback client endpoint on
+// an existing server. It does not recreate the interface or any peer.
+func SetSecondaryEndpointCommand(sudo, host string) string {
+	return sudo + "env AWG_SERVER_IP_ALT=" + shellQuote(host) + " bash -s -- --set-secondary-endpoint " + shellQuote(host)
+}
+
 // RemoveClientCommand builds the remote command to delete a client.
 func RemoveClientCommand(sudo, name string) string {
 	return sudo + "bash -s -- --remove-client " + shellQuote(name)

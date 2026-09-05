@@ -54,6 +54,8 @@ func main() {
 		err = runInstall(os.Args[2:])
 	case "add-client":
 		err = runAddClient(os.Args[2:])
+	case "set-secondary-endpoint":
+		err = runSetSecondaryEndpoint(os.Args[2:])
 	case "remove-client":
 		err = runRemoveClient(os.Args[2:])
 	case "list":
@@ -83,6 +85,7 @@ func usage() {
 
   awg-deploy install       user@host[:port] [--client phone]   # port auto-picked, universal profile
   awg-deploy add-client    user@host[:port] <name>
+	  awg-deploy set-secondary-endpoint user@host[:port] <IP-or-host>
   awg-deploy remove-client user@host[:port] <name>
   awg-deploy list          user@host[:port]
   awg-deploy menu          user@host[:port]            # interactive menu over SSH
@@ -153,6 +156,7 @@ func runInstall(args []string) error {
 	preset := fs.String("preset", "mobile", "obfuscation preset (mobile works on phone and PC)")
 	client := fs.String("client", "phone", "first client name")
 	serverIP := fs.String("server-ip", "", "public IP/host clients connect to (default: autodetect)")
+	serverIPAlt := fs.String("server-ip-alt", "", "optional fallback public IP/host for second client profile")
 	dns1 := fs.String("dns1", "", "client DNS 1 (default 1.1.1.1)")
 	dns2 := fs.String("dns2", "", "client DNS 2 (default 1.0.0.1)")
 	out := fs.String("out", "", "where to save the client .conf (default <client>.conf)")
@@ -171,6 +175,7 @@ func runInstall(args []string) error {
 	env := map[string]string{"AWG_PRESET": *preset, "AWG_CLIENT": *client}
 	putIf(env, "AWG_PORT", *port)
 	putIf(env, "AWG_SERVER_IP", *serverIP)
+	putIf(env, "AWG_SERVER_IP_ALT", *serverIPAlt)
 	putIf(env, "AWG_DNS1", *dns1)
 	putIf(env, "AWG_DNS2", *dns2)
 
@@ -263,6 +268,30 @@ func runAddClient(args []string) error {
 		return fmt.Errorf("создание клиента не удалось: %w", err)
 	}
 	return saveAndShow(output, defaultOut(*out, name))
+}
+
+func runSetSecondaryEndpoint(args []string) error {
+	fs := flag.NewFlagSet("set-secondary-endpoint", flag.ExitOnError)
+	af := registerAuthFlags(fs)
+	_ = fs.Parse(args)
+	rest := fs.Args()
+	if len(rest) < 2 {
+		return errors.New("usage: awg-deploy set-secondary-endpoint user@host <IP-or-host>")
+	}
+	t, err := deploy.ParseTarget(rest[0])
+	if err != nil {
+		return err
+	}
+	cl, err := connect(t, af)
+	if err != nil {
+		return err
+	}
+	defer cl.Close()
+	out, err := cl.RunScript(deploy.SetSecondaryEndpointCommand(deploy.Sudo(t.User), rest[1]), amneziawg.InstallerScript, os.Stdout)
+	if err != nil {
+		return fmt.Errorf("не удалось сохранить резервный Endpoint: %w\n%s", err, out)
+	}
+	return nil
 }
 
 // runMenu uploads the installer to the server and opens its interactive menu

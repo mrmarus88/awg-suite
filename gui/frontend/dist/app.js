@@ -53,6 +53,9 @@ const I18N = {
     ph_dns1: "1.1.1.1",
     ph_dns2: "1.0.0.1 (резервный)",
     ph_port: "авто",
+    lbl_secondary_endpoint: "Резервный Endpoint (необязательно)",
+    ph_secondary_endpoint: "146.103.102.101",
+    tip_secondary_endpoint: "Второй IP или домен того же сервера. Для каждого клиента будут созданы два одинаковых профиля с разными Endpoint.",
     btn_install: "Установить",
     tab_clients: "Клиенты",
     tab_monitor: "Мониторинг",
@@ -116,6 +119,10 @@ const I18N = {
     settings_rename_hint: "Понятное имя для этого подключения в приложении. На сам сервер не влияет.",
     ph_server_name: "например, VDSina DE",
     btn_save: "Сохранить",
+    settings_secondary_endpoint: "Резервный Endpoint",
+    settings_secondary_endpoint_hint: "Второй публичный IP или домен уже настроенного сервера. Сохранение не переустанавливает VPN и не меняет ключи.",
+    profile_primary: "Основной IP",
+    profile_secondary: "Резервный IP",
     settings_password: "Пароль веб-панели",
     settings_password_hint: "Сменить пароль администратора веб-панели. Применяется сразу.",
     ph_new_panel_pass: "новый пароль",
@@ -243,6 +250,7 @@ const I18N = {
     e_remove_panel: "Не удалось удалить панель: ",
     e_open_browser: "Не удалось открыть браузер: ",
     e_save: "Не удалось сохранить: ",
+    e_secondary_endpoint: "Не удалось сохранить резервный Endpoint: ",
 
     confirm_remove_client: "Удалить клиента «{name}»? Его профиль перестанет работать.",
     confirm_uninstall: "Это ПОЛНОСТЬЮ удалит AmneziaWG, веб-панель, всех клиентов и конфиги с сервера. Продолжить?",
@@ -284,6 +292,9 @@ const I18N = {
     ph_dns1: "1.1.1.1",
     ph_dns2: "1.0.0.1 (secondary)",
     ph_port: "auto",
+    lbl_secondary_endpoint: "Fallback Endpoint (optional)",
+    ph_secondary_endpoint: "146.103.102.101",
+    tip_secondary_endpoint: "A second IP or hostname for the same server. Each client gets two otherwise identical profiles with different Endpoints.",
     btn_install: "Install",
     tab_clients: "Clients",
     tab_monitor: "Monitoring",
@@ -347,6 +358,10 @@ const I18N = {
     settings_rename_hint: "A friendly name for this connection in the app. Does not affect the server itself.",
     ph_server_name: "e.g. VDSina DE",
     btn_save: "Save",
+    settings_secondary_endpoint: "Fallback Endpoint",
+    settings_secondary_endpoint_hint: "A second public IP or hostname already routed to this server. Saving does not reinstall the VPN or change keys.",
+    profile_primary: "Primary IP",
+    profile_secondary: "Fallback IP",
     settings_password: "Web panel password",
     settings_password_hint: "Change the web panel admin password. Applies immediately.",
     ph_new_panel_pass: "new password",
@@ -474,6 +489,7 @@ const I18N = {
     e_remove_panel: "Could not remove the panel: ",
     e_open_browser: "Could not open the browser: ",
     e_save: "Could not save: ",
+    e_secondary_endpoint: "Could not save fallback Endpoint: ",
 
     confirm_remove_client: "Remove client \"{name}\"? Its profile will stop working.",
     confirm_uninstall: "This will COMPLETELY remove AmneziaWG, the web panel, all clients and configs from the server. Continue?",
@@ -813,6 +829,7 @@ async function install() {
     preset: $("obf-profile").value,
     dns1: $("dns1").value.trim(),
     dns2: $("dns2").value.trim(),
+    secondaryEndpoint: $("secondary-endpoint").value.trim(),
   };
   openLog(t("log_install"));
   $("btn-install").disabled = true;
@@ -1486,21 +1503,47 @@ async function changePanelPassword() {
   }
 }
 
+async function saveSecondaryEndpoint() {
+  const endpoint = $("settings-secondary-endpoint").value.trim();
+  busy(true, t("busy_saving"));
+  try {
+    await backend().SetSecondaryEndpoint(endpoint);
+    toast(t("toast_saved", { path: endpoint || t("profile_primary") }), "ok");
+  } catch (err) {
+    toast(t("e_secondary_endpoint") + errMsg(err), "err");
+  } finally {
+    busy(false);
+  }
+}
+
 // --- client result (QR + conf) ---------------------------------------------
 
 function showResult(res) {
   lastResult = res;
   $("result-name").textContent = res.name;
-  $("result-qr").src = res.qr || "";
-  $("result-conf").textContent = res.conf || "";
+  $("result-endpoints").classList.toggle("hidden", !res.confAlt);
+  showResultProfile("primary");
   show($("result"));
   $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function showResultProfile(profile) {
+  if (!lastResult) return;
+  const secondary = profile === "secondary" && lastResult.confAlt;
+  $("result-qr").src = secondary ? (lastResult.qrAlt || "") : (lastResult.qr || "");
+  $("result-conf").textContent = secondary ? lastResult.confAlt : (lastResult.conf || "");
+  $("result-primary").classList.toggle("primary", !secondary);
+  $("result-secondary").classList.toggle("primary", !!secondary);
+  lastResult.activeProfile = secondary ? "secondary" : "primary";
 }
 
 async function downloadConf() {
   if (!lastResult) return;
   try {
-    const path = await backend().SaveConfig(lastResult.name, lastResult.conf);
+    const secondary = lastResult.activeProfile === "secondary";
+    const conf = secondary ? lastResult.confAlt : lastResult.conf;
+    const name = secondary ? lastResult.name + "-secondary" : lastResult.name;
+    const path = await backend().SaveConfig(name, conf);
     if (path) toast(t("toast_saved", { path }), "ok");
   } catch (err) {
     toast(t("e_save") + errMsg(err), "err");
@@ -1532,6 +1575,7 @@ window.addEventListener("DOMContentLoaded", () => {
   $("btn-remove-panel").addEventListener("click", removePanel);
   $("btn-rename-server").addEventListener("click", renameServer);
   $("btn-change-pass").addEventListener("click", changePanelPassword);
+  $("btn-save-secondary-endpoint").addEventListener("click", saveSecondaryEndpoint);
   $("btn-update-check").addEventListener("click", checkUpdate);
   $("btn-update-download").addEventListener("click", () => { if (updateURLs.download) openExternal(updateURLs.download); });
   $("btn-update-notes").addEventListener("click", () => { if (updateURLs.release) openExternal(updateURLs.release); });
@@ -1552,6 +1596,8 @@ window.addEventListener("DOMContentLoaded", () => {
   $("log-close").addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closeLog(); });
   $("result-close").addEventListener("click", () => hide($("result")));
   $("result-download").addEventListener("click", downloadConf);
+  $("result-primary").addEventListener("click", () => showResultProfile("primary"));
+  $("result-secondary").addEventListener("click", () => showResultProfile("secondary"));
   ["ios", "android", "macos", "windows"].forEach((os) => {
     $("link-" + os).addEventListener("click", (e) => { e.preventDefault(); openExternal(APP_URLS[os]); });
   });

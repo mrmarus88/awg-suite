@@ -96,6 +96,15 @@ func TestAddClientCommand_Overrides(t *testing.T) {
 	}
 }
 
+func TestSetSecondaryEndpointCommand(t *testing.T) {
+	cmd := SetSecondaryEndpointCommand("sudo ", "146.103.102.101")
+	for _, want := range []string{"sudo env ", "AWG_SERVER_IP_ALT='146.103.102.101'", "--set-secondary-endpoint '146.103.102.101'"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("SetSecondaryEndpointCommand missing %q in %q", want, cmd)
+		}
+	}
+}
+
 func TestRemoveAndListCommands(t *testing.T) {
 	if got := RemoveClientCommand("sudo ", "laptop"); got != "sudo bash -s -- --remove-client 'laptop'" {
 		t.Errorf("RemoveClientCommand = %q", got)

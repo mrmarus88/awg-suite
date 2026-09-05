@@ -353,6 +353,10 @@ installQuestions() {
 	# defaults). Used by the SSH deploy tool so install runs without prompts.
 	if [[ "${NONINTERACTIVE}" == "1" ]]; then
 		SERVER_PUB_IP="${AWG_SERVER_IP:-$(detectPublicIP)}"
+		# Optional fallback address.  SERVER_PUB_IP remains the canonical primary
+		# address so params files and client profiles from older installs keep their
+		# exact meaning.
+		SERVER_PUB_IP_ALT="${AWG_SERVER_IP_ALT:-}"
 		SERVER_PUB_NIC="${AWG_SERVER_NIC:-$(detectPublicNIC)}"
 		SERVER_PORT="${AWG_PORT:-$(pickFreePort)}"
 		if portInUse "${SERVER_PORT}"; then
@@ -380,6 +384,7 @@ installQuestions() {
 
 	read -rp "Публичный IP/домен сервера [${default_ip}]: " SERVER_PUB_IP
 	SERVER_PUB_IP="${SERVER_PUB_IP:-$default_ip}"
+	read -rp "Второй публичный IP/домен (необязательно): " SERVER_PUB_IP_ALT
 
 	read -rp "Внешний сетевой интерфейс [${default_nic}]: " SERVER_PUB_NIC
 	SERVER_PUB_NIC="${SERVER_PUB_NIC:-$default_nic}"
@@ -492,6 +497,7 @@ writeServerConfig() {
 	# Persist all settings so the management menu can reuse them later.
 	cat >"${PARAMS_FILE}" <<-EOF
 		SERVER_PUB_IP=${SERVER_PUB_IP}
+		SERVER_PUB_IP_ALT=${SERVER_PUB_IP_ALT:-}
 		SERVER_PUB_NIC=${SERVER_PUB_NIC}
 		SERVER_WG_NIC=${AWG_NIC}
 		SERVER_WG_IPV4=${SERVER_WG_IPV4}
@@ -631,7 +637,7 @@ newClient() {
 		return 1
 	fi
 
-	local octet client_ipv4 client_ipv6 priv pub psk client_file
+	local octet client_ipv4 client_ipv6 priv pub psk client_file alt_client_file
 	octet=$(nextClientIP)
 	client_ipv4="10.66.66.${octet}"
 	client_ipv6="fd42:42:42::${octet}"
@@ -684,9 +690,20 @@ newClient() {
 		PersistentKeepalive = 25
 	EOF
 
+	# A fallback profile is deliberately a byte-for-byte copy of the primary
+	# profile except for Endpoint.  It therefore uses the same client private
+	# key, peer public key and PSK; importing either profile does not create a
+	# second peer on the server.
+	if [[ -n "${SERVER_PUB_IP_ALT:-}" ]]; then
+		alt_client_file="${CLIENT_OUT_DIR}/${SERVER_WG_NIC}-client-${name}-secondary.conf"
+		sed "s|^Endpoint = .*|Endpoint = ${SERVER_PUB_IP_ALT}:${SERVER_PORT}|" "${client_file}" >"${alt_client_file}"
+		chmod 600 "${alt_client_file}"
+	fi
+
 	# Mirror the config into the panel's client dir so the web panel can serve
 	# the download/QR even for clients created from the CLI / installer.
 	mkdir -p "${PANEL_CLIENT_DIR}" 2>/dev/null && cp "${client_file}" "${PANEL_CLIENT_DIR}/" 2>/dev/null || true
+	[[ -n "${alt_client_file:-}" ]] && cp "${alt_client_file}" "${PANEL_CLIENT_DIR}/" 2>/dev/null || true
 
 	# Apply live without dropping existing connections.
 	if systemctl is-active --quiet "awg-quick@${SERVER_WG_NIC}"; then
@@ -704,6 +721,9 @@ newClient() {
 	echo -e "Файл конфигурации: ${BOLD}${client_file}${NC}"
 	echo
 	warn "$(t one_profile)"
+	if [[ -n "${alt_client_file:-}" ]]; then
+		echo -e "Резервный профиль (те же ключи, другой Endpoint): ${BOLD}${alt_client_file}${NC}"
+	fi
 
 	# For automation (the SSH deploy tool): emit the config fenced so it can be
 	# captured over SSH without guessing the file path.
@@ -711,6 +731,11 @@ newClient() {
 		echo "-----BEGIN_AWG_CONF-----"
 		cat "${client_file}"
 		echo "-----END_AWG_CONF-----"
+		if [[ -n "${alt_client_file:-}" ]]; then
+			echo "-----BEGIN_AWG_CONF_SECONDARY-----"
+			cat "${alt_client_file}"
+			echo "-----END_AWG_CONF_SECONDARY-----"
+		fi
 	fi
 }
 
@@ -746,7 +771,9 @@ removeClientByName() {
 	# Drop a leftover blank line if present.
 	sed -i '/^$/N;/^\n$/D' "${SERVER_CONF}"
 	rm -f "${CLIENT_OUT_DIR}/${SERVER_WG_NIC}-client-${name}.conf"
+	rm -f "${CLIENT_OUT_DIR}/${SERVER_WG_NIC}-client-${name}-secondary.conf"
 	rm -f "${PANEL_CLIENT_DIR}/${SERVER_WG_NIC}-client-${name}.conf"
+	rm -f "${PANEL_CLIENT_DIR}/${SERVER_WG_NIC}-client-${name}-secondary.conf"
 
 	if systemctl is-active --quiet "awg-quick@${SERVER_WG_NIC}"; then
 		awg syncconf "${SERVER_WG_NIC}" <(awg-quick strip "${SERVER_WG_NIC}") 2>/dev/null || \
@@ -779,9 +806,11 @@ renameClientByName() {
 	sed -i "s/^# BEGIN_PEER ${old}\$/# BEGIN_PEER ${new}/; s/^# END_PEER ${old}\$/# END_PEER ${new}/" "${SERVER_CONF}"
 	local from to
 	for dir in "${CLIENT_OUT_DIR}" "${PANEL_CLIENT_DIR}"; do
-		from="${dir}/${SERVER_WG_NIC}-client-${old}.conf"
-		to="${dir}/${SERVER_WG_NIC}-client-${new}.conf"
-		[[ -f "${from}" ]] && mv -f "${from}" "${to}" 2>/dev/null || true
+		for suffix in "" "-secondary"; do
+			from="${dir}/${SERVER_WG_NIC}-client-${old}${suffix}.conf"
+			to="${dir}/${SERVER_WG_NIC}-client-${new}${suffix}.conf"
+			[[ -f "${from}" ]] && mv -f "${from}" "${to}" 2>/dev/null || true
+		done
 	done
 	ok "Клиент '${old}' переименован в '${new}'."
 }
@@ -857,9 +886,33 @@ showStatus() {
 	echo
 	echo -e "${BOLD}Статус сервера${NC}"
 	echo "  Endpoint : ${SERVER_PUB_IP}:${SERVER_PORT}/udp"
+	[[ -n "${SERVER_PUB_IP_ALT:-}" ]] && echo "  Резервный: ${SERVER_PUB_IP_ALT}:${SERVER_PORT}/udp"
 	echo "  Служба   : $(systemctl is-active "awg-quick@${SERVER_WG_NIC}" 2>/dev/null || echo unknown)"
 	echo
 	awg show "${SERVER_WG_NIC}" 2>/dev/null || warn "Интерфейс ${SERVER_WG_NIC} не поднят."
+}
+
+# setSecondaryEndpoint updates only the optional client-facing fallback address.
+# The WireGuard interface, listening port and all peers are intentionally left
+# untouched, so this is safe to run on an already configured server.
+setSecondaryEndpoint() {
+	loadParams
+	local endpoint="${AWG_SERVER_IP_ALT:-}"
+	if [[ -n "${endpoint}" && ! "${endpoint}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+		err "Второй Endpoint должен быть IPv4-адресом или именем хоста."
+		return 1
+	fi
+	if grep -q '^SERVER_PUB_IP_ALT=' "${PARAMS_FILE}"; then
+		sed -i "s|^SERVER_PUB_IP_ALT=.*|SERVER_PUB_IP_ALT=${endpoint}|" "${PARAMS_FILE}"
+	else
+		printf '\nSERVER_PUB_IP_ALT=%s\n' "${endpoint}" >>"${PARAMS_FILE}"
+	fi
+	chmod 600 "${PARAMS_FILE}"
+	if [[ -n "${endpoint}" ]]; then
+		ok "Резервный Endpoint сохранён: ${endpoint}:${SERVER_PORT}"
+	else
+		ok "Резервный Endpoint удалён. Основной профиль не изменён."
+	fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1249,6 +1302,7 @@ parseArgs() {
 			--add-client) ADD_CLIENT="${2:-}"; shift 2 ;;
 			--remove-client) REMOVE_CLIENT="${2:-}"; shift 2 ;;
 			--rename-client) RENAME_OLD="${2:-}"; RENAME_NEW="${3:-}"; shift 3 ;;
+			--set-secondary-endpoint) SET_SECONDARY_ENDPOINT=1; AWG_SERVER_IP_ALT="${2:-}"; shift 2 ;;
 			--list) LIST_CLIENTS=1; shift ;;
 			--uninstall) UNINSTALL=1; shift ;;
 			--install-panel) INSTALL_PANEL=1; shift ;;
@@ -1257,12 +1311,13 @@ parseArgs() {
 			--remove-bot) REMOVE_BOT=1; shift ;;
 			--lang) AWG_LANG="${2:-}"; shift 2 ;;
 			-h | --help)
-				echo "Usage: $0 [-y|--yes] [--lang en|ru] [--add-client NAME] [--remove-client NAME] [--list]"
+				echo "Usage: $0 [-y|--yes] [--lang en|ru] [--add-client NAME] [--remove-client NAME] [--set-secondary-endpoint HOST] [--list]"
 				echo "  -y, --yes          non-interactive install (settings from AWG_* env)"
 				echo "  --lang en|ru       UI language (default: auto from \$LANG)"
 				echo "  --add-client N     create client N and exit (for automation/SSH)"
 				echo "  --remove-client N  remove client N and exit"
 				echo "  --rename-client OLD NEW  rename a client and exit"
+				echo "  --set-secondary-endpoint HOST  set or clear the optional fallback Endpoint (no reinstall)"
 				echo "  --list             list clients and exit"
 				echo "  --uninstall        remove everything (needs AWG_CONFIRM=yes)"
 				echo "  --install-panel    install the web panel (password via AWG_PANEL_PASSWORD)"
@@ -1302,6 +1357,10 @@ main() {
 	fi
 	if [[ -n "${RENAME_OLD}" ]]; then
 		renameClientByName "${RENAME_OLD}" "${RENAME_NEW}"
+		exit $?
+	fi
+	if [[ "${SET_SECONDARY_ENDPOINT:-0}" == "1" ]]; then
+		setSecondaryEndpoint
 		exit $?
 	fi
 	if [[ -n "${ADD_CLIENT}" ]]; then

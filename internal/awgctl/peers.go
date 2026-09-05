@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+var endpointLine = regexp.MustCompile(`(?m)^Endpoint\s*=\s*.*$`)
+
 // ipBase is the /24 the installer uses for the VPN subnet (server is .1).
 const ipBase = "10.66.66."
 
@@ -230,6 +232,14 @@ PersistentKeepalive = 25
 		p.Jc, p.Jmin, p.Jmax, p.S1, p.S2, p.H1, p.H2, p.H3, p.H4,
 		p.ServerPubKey, psk, p.ServerPubIP, p.ServerPort, allowedIPs,
 	)
+}
+
+// WithEndpoint returns a copy of a client profile which differs only in its
+// peer Endpoint. The client private key, preshared key and every AmneziaWG
+// parameter stay exactly the same, so primary and fallback profiles represent
+// the same server peer.
+func WithEndpoint(config, host, port string) string {
+	return endpointLine.ReplaceAllString(config, "Endpoint = "+host+":"+port)
 }
 
 // collapseBlankLines squeezes runs of blank lines into a single one.

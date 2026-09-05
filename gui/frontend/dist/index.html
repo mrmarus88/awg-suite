@@ -109,6 +109,9 @@
                 <input id="dns1" type="text" data-i18n-ph="ph_dns1" placeholder="1.1.1.1" autocomplete="off" />
               </label>
               <input id="dns2" type="text" data-i18n-ph="ph_dns2" placeholder="1.0.0.1 (резервный)" autocomplete="off" style="margin-top:.4rem" />
+              <label><span class="fld-label"><span data-i18n="lbl_secondary_endpoint">Резервный Endpoint (необязательно)</span><span class="hint" tabindex="0">?<span class="tip" data-i18n="tip_secondary_endpoint">Второй IP или домен того же сервера. Для каждого клиента будут созданы два одинаковых профиля с разными Endpoint.</span></span></span>
+                <input id="secondary-endpoint" type="text" data-i18n-ph="ph_secondary_endpoint" placeholder="146.103.102.101" autocomplete="off" />
+              </label>
             </details>
             <button id="btn-install" class="primary block" data-i18n="btn_install">Установить</button>
           </div>
@@ -318,6 +321,15 @@
               </div>
             </div>
 
+            <div class="card">
+              <h2 class="card-title" data-i18n="settings_secondary_endpoint">Резервный Endpoint</h2>
+              <p class="dim" data-i18n="settings_secondary_endpoint_hint">Второй публичный IP или домен уже настроенного сервера. Сохранение не переустанавливает VPN и не меняет ключи.</p>
+              <div class="inline-form">
+                <input id="settings-secondary-endpoint" type="text" data-i18n-ph="ph_secondary_endpoint" placeholder="146.103.102.101" autocomplete="off" />
+                <button id="btn-save-secondary-endpoint" class="primary" data-i18n="btn_save">Сохранить</button>
+              </div>
+            </div>
+
             <div id="settings-panel-pw" class="card">
               <h2 class="card-title" data-i18n="settings_password">Пароль веб-панели</h2>
               <p class="dim" data-i18n="settings_password_hint">Сменить пароль администратора веб-панели. Применяется сразу.</p>
@@ -383,6 +395,10 @@
               <a href="#" id="link-macos">macOS</a> ·
               <a href="#" id="link-windows">Windows</a>
             </p>
+            <div id="result-endpoints" class="row-actions hidden" style="justify-content:flex-start">
+              <button id="result-primary" class="ghost" data-i18n="profile_primary">Основной IP</button>
+              <button id="result-secondary" class="ghost" data-i18n="profile_secondary">Резервный IP</button>
+            </div>
             <div class="created-body">
               <div class="qr"><img id="result-qr" alt="QR" /></div>
               <pre id="result-conf" class="conf mono"></pre>

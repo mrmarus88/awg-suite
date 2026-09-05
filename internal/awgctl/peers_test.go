@@ -187,6 +187,7 @@ func TestRenderClientConfig_Overrides(t *testing.T) {
 
 func TestParseParams(t *testing.T) {
 	content := `SERVER_PUB_IP=203.0.113.7
+SERVER_PUB_IP_ALT=198.51.100.9
 SERVER_PORT=51820
 SERVER_PUB_KEY=SRVPUB=
 CLIENT_DNS_1=1.1.1.1
@@ -196,7 +197,7 @@ JC=3
 JMIN=40
 `
 	p := ParseParams(content)
-	if p.ServerPubIP != "203.0.113.7" || p.ServerPort != "51820" {
+	if p.ServerPubIP != "203.0.113.7" || p.ServerPubIPAlt != "198.51.100.9" || p.ServerPort != "51820" {
 		t.Errorf("server fields wrong: %+v", p)
 	}
 	if p.Jc != "3" || p.Jmin != "40" {
@@ -204,5 +205,16 @@ JMIN=40
 	}
 	if p.ClientMTU != "1420" { // default when absent
 		t.Errorf("ClientMTU default = %q, want 1420", p.ClientMTU)
+	}
+}
+
+func TestWithEndpoint_OnlyReplacesEndpoint(t *testing.T) {
+	primary := "[Peer]\nPublicKey = SERVER=\nEndpoint = 89.124.101.33:41399\nAllowedIPs = 0.0.0.0/0\n"
+	got := WithEndpoint(primary, "146.103.102.101", "41399")
+	if !strings.Contains(got, "Endpoint = 146.103.102.101:41399") {
+		t.Fatalf("fallback Endpoint missing: %q", got)
+	}
+	if strings.Contains(got, "89.124.101.33") || !strings.Contains(got, "PublicKey = SERVER=") {
+		t.Errorf("only Endpoint should change: %q", got)
 	}
 }
