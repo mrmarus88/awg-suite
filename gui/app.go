@@ -277,7 +277,8 @@ func (a *App) Install(req InstallRequest) (ClientResult, error) {
 }
 
 // AddClient creates a new client on the server and returns its config + QR.
-func (a *App) AddClient(name, allowedIPs, dns, mtu string) (ClientResult, error) {
+// endpointProfile may be "primary", "secondary", or "both" (the default).
+func (a *App) AddClient(name, allowedIPs, dns, mtu, endpointProfile string) (ClientResult, error) {
 	cl, t, err := a.conn()
 	if err != nil {
 		return ClientResult{}, err
@@ -297,6 +298,13 @@ func (a *App) AddClient(name, allowedIPs, dns, mtu string) (ClientResult, error)
 	}
 	if v := safeMTU(mtu); v != "" {
 		env["AWG_CLIENT_MTU"] = v
+	}
+	endpointProfile = strings.TrimSpace(endpointProfile)
+	if endpointProfile != "" && endpointProfile != "both" {
+		if endpointProfile != "primary" && endpointProfile != "secondary" {
+			return ClientResult{}, fmt.Errorf("неизвестный профиль Endpoint")
+		}
+		env["AWG_CLIENT_PROFILE"] = endpointProfile
 	}
 	out, err := cl.RunScript(deploy.AddClientCommand(deploy.Sudo(t.User), name, env), amneziawg.InstallerScript, a.logWriter("client:log"))
 	if err != nil {

@@ -154,6 +154,13 @@
                 <label><span class="fld-label"><span data-i18n="f_mtu">MTU</span><span class="hint" tabindex="0">?<span class="tip" data-i18n="tip_mtu">Максимальный размер пакета.</span></span></span>
                   <input id="adv-mtu" type="number" min="576" max="9000" placeholder="auto" autocomplete="off" />
                 </label>
+                <label><span class="fld-label" data-i18n="f_endpoint_profile">Профиль Endpoint</span>
+                  <select id="adv-endpoint-profile">
+                    <option value="both" data-i18n="endpoint_profile_both">Оба IP: показать два профиля</option>
+                    <option value="primary" data-i18n="endpoint_profile_primary">Только основной IP</option>
+                    <option value="secondary" data-i18n="endpoint_profile_secondary">Только резервный IP</option>
+                  </select>
+                </label>
               </div>
               <p class="dim adv-hint" data-i18n="hint_advanced">Пусто = весь трафик (0.0.0.0/0) и серверные DNS/MTU. Split-tunnel: укажите нужные подсети.</p>
             </details>

@@ -66,6 +66,10 @@ const I18N = {
     f_routes: "Маршруты (AllowedIPs)",
     f_dns: "DNS",
     f_mtu: "MTU",
+    f_endpoint_profile: "Профиль Endpoint",
+    endpoint_profile_both: "Оба IP: показать два профиля",
+    endpoint_profile_primary: "Только основной IP",
+    endpoint_profile_secondary: "Только резервный IP",
     hint_advanced: "Пусто = весь трафик (0.0.0.0/0) и серверные DNS/MTU. Split-tunnel: укажите нужные подсети.",
     tip_port: "UDP-порт, на котором сервер слушает VPN. Пусто = подберётся свободный случайный.",
     tip_profile: "Как маскируется трафик от DPI. Мобильный — надёжно везде (4G/ПК). Десктоп — выше MTU для проводных. Чистый WireGuard — без маскировки (быстрее, но цензор видит).",
@@ -305,6 +309,10 @@ const I18N = {
     f_routes: "Routes (AllowedIPs)",
     f_dns: "DNS",
     f_mtu: "MTU",
+    f_endpoint_profile: "Endpoint profile",
+    endpoint_profile_both: "Both IPs: show two profiles",
+    endpoint_profile_primary: "Primary IP only",
+    endpoint_profile_secondary: "Fallback IP only",
     hint_advanced: "Empty = all traffic (0.0.0.0/0) and the server's DNS/MTU. Split tunnel: list the subnets to route.",
     tip_port: "The UDP port the server listens on for the VPN. Empty = auto-pick a free random one.",
     tip_profile: "How traffic is disguised from DPI. Mobile — reliable everywhere (4G/PC). Desktop — higher MTU for wired links. Plain WireGuard — no disguise (faster, but visible to censors).",
@@ -995,9 +1003,11 @@ async function addClient(e) {
       $("adv-allowed").value.trim(),
       $("adv-dns").value.trim(),
       $("adv-mtu").value.trim(),
+      $("adv-endpoint-profile").value,
     );
     $("new-client").value = "";
     ["adv-allowed", "adv-dns", "adv-mtu"].forEach((id) => { $(id).value = ""; });
+    $("adv-endpoint-profile").value = "both";
     await refreshClients();
     showResult(res);
   } catch (err) {

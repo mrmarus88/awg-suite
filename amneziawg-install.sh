@@ -637,6 +637,19 @@ newClient() {
 		return 1
 	fi
 
+	# The desktop app may request just one of the two endpoint variants.  Keep
+	# writing both files when a fallback is configured: they share the same peer
+	# keys and remain available for a later switch without touching the server.
+	local client_profile="${AWG_CLIENT_PROFILE:-both}"
+	case "${client_profile}" in
+		primary | secondary | both) ;;
+		*) err "Неизвестный профиль Endpoint: ${client_profile}"; return 1 ;;
+	esac
+	if [[ "${client_profile}" == "secondary" && -z "${SERVER_PUB_IP_ALT:-}" ]]; then
+		err "Резервный Endpoint ещё не настроен."
+		return 1
+	fi
+
 	local octet client_ipv4 client_ipv6 priv pub psk client_file alt_client_file
 	octet=$(nextClientIP)
 	client_ipv4="10.66.66.${octet}"
@@ -729,9 +742,13 @@ newClient() {
 	# captured over SSH without guessing the file path.
 	if [[ "${AWG_PRINT_CONFIG:-0}" == "1" ]]; then
 		echo "-----BEGIN_AWG_CONF-----"
-		cat "${client_file}"
+		if [[ "${client_profile}" == "secondary" ]]; then
+			cat "${alt_client_file}"
+		else
+			cat "${client_file}"
+		fi
 		echo "-----END_AWG_CONF-----"
-		if [[ -n "${alt_client_file:-}" ]]; then
+		if [[ "${client_profile}" == "both" && -n "${alt_client_file:-}" ]]; then
 			echo "-----BEGIN_AWG_CONF_SECONDARY-----"
 			cat "${alt_client_file}"
 			echo "-----END_AWG_CONF_SECONDARY-----"
