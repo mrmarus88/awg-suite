@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/hennessyxo/awg-suite/internal/awgctl"
+)
 
 func TestValidPanelPassword(t *testing.T) {
 	cases := []struct {
@@ -46,5 +51,20 @@ func TestExtractSecondaryConfig(t *testing.T) {
 	got := extractSecondaryConfig(output)
 	if got != "Endpoint = 146.103.102.101:41399\n" {
 		t.Errorf("extractSecondaryConfig = %q", got)
+	}
+}
+
+func TestClientConfigsForEndpoints_NormalizesOldStoredEndpoint(t *testing.T) {
+	stored := "[Peer]\nEndpoint = 146.103.102.101:41399\nAllowedIPs = 0.0.0.0/0\n"
+	params := awgctl.Params{ServerPubIP: "89.124.101.33", ServerPubIPAlt: "146.103.102.101", ServerPort: "41399"}
+	primary, fallback := clientConfigsForEndpoints(stored, params)
+	if !strings.Contains(primary, "Endpoint = 89.124.101.33:41399") {
+		t.Fatalf("primary profile did not use current primary endpoint:\n%s", primary)
+	}
+	if !strings.Contains(fallback, "Endpoint = 146.103.102.101:41399") {
+		t.Fatalf("fallback profile did not use fallback endpoint:\n%s", fallback)
+	}
+	if strings.Contains(primary, "Endpoint = 146.103.102.101:41399") {
+		t.Fatalf("primary profile retained old stored endpoint:\n%s", primary)
 	}
 }

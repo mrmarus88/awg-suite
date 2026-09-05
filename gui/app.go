@@ -389,17 +389,27 @@ func (a *App) ClientConfig(name string) (ClientResult, error) {
 	if err != nil || strings.TrimSpace(out) == "" {
 		return ClientResult{}, fmt.Errorf("конфиг клиента не найден на сервере (возможно, он создан вне установщика)")
 	}
-	primary := strings.TrimSpace(out) + "\n"
 	paramsOut, _ := cl.Run(deploy.Sudo(t.User) + "cat /etc/amnezia/amneziawg/params 2>/dev/null || true")
 	params := awgctl.ParseParams(paramsOut)
-	alt := ""
+	primary, alt := clientConfigsForEndpoints(out, params)
+	return clientResultFromConfs(name, primary, alt), nil
+}
+
+// clientConfigsForEndpoints rebuilds both client-facing addresses from the
+// current server settings. Existing client .conf files can have been made
+// before an address changed, so their old Endpoint must never determine which
+// profile is shown as "primary" in the app.
+func clientConfigsForEndpoints(conf string, params awgctl.Params) (primary, alt string) {
+	primary = strings.TrimSpace(conf) + "\n"
+	if params.ServerPubIP != "" {
+		primary = awgctl.WithEndpoint(primary, params.ServerPubIP, params.ServerPort)
+	}
 	if params.ServerPubIPAlt != "" {
-		// Generate it on demand instead of relying on a second file. This lets a
-		// server that already had clients gain fallback exports immediately after
-		// SetSecondaryEndpoint, with no peer/key changes or reinstallation.
+		// Build the fallback from the freshly normalized primary profile so only
+		// the Endpoint line differs, even for older stored configurations.
 		alt = awgctl.WithEndpoint(primary, params.ServerPubIPAlt, params.ServerPort)
 	}
-	return clientResultFromConfs(name, primary, alt), nil
+	return primary, alt
 }
 
 // SetSecondaryEndpoint changes only the optional fallback address in params.
